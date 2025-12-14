@@ -4,57 +4,33 @@ import os
 import pandas as pd
 from dotenv import load_dotenv
 
-from sovereign_risk.sources.worldbank import fetch_wdi_indicator
-from sovereign_risk.sources.imf_weo import fetch_weo
+from ..sources.worldbank import fetch_wdi_indicator
+from ..sources.imf_weo import fetch_weo
 
 
-# -----------------------------
-# Pillar 1: data series mapping
-# -----------------------------
 PILLAR1_WDI: dict[str, str] = {
-    # Growth
-    "gdp_growth_real_wdi": "NY.GDP.MKTP.KD.ZG",      # GDP growth (annual %)
-    "gdp_pc_growth_wdi": "NY.GDP.PCAP.KD.ZG",        # GDP per capita growth (annual %)
-
-    # Structure / diversification proxies
-    "agri_share_gdp": "NV.AGR.TOTL.ZS",             # Agriculture, value added (% of GDP)
-    "ind_share_gdp": "NV.IND.TOTL.ZS",              # Industry, value added (% of GDP)
-    "serv_share_gdp": "NV.SRV.TOTL.ZS",             # Services, value added (% of GDP)
-    "resource_rents_gdp": "NY.GDP.TOTL.RT.ZS",       # Total natural resources rents (% of GDP)
-
-    # Buffers / financial depth proxy
-    "private_credit_gdp": "FS.AST.PRVT.GD.ZS",       # Domestic credit to private sector (% of GDP)
+    "gdp_growth_real_wdi": "NY.GDP.MKTP.KD.ZG",
+    "gdp_pc_growth_wdi": "NY.GDP.PCAP.KD.ZG",
+    "agri_share_gdp": "NV.AGR.TOTL.ZS",
+    "ind_share_gdp": "NV.IND.TOTL.ZS",
+    "serv_share_gdp": "NV.SRV.TOTL.ZS",
+    "resource_rents_gdp": "NY.GDP.TOTL.RT.ZS",
+    "private_credit_gdp": "FS.AST.PRVT.GD.ZS",
 }
 
-# IMF WEO codes (these are commonly used; availability can differ by release)
 PILLAR1_WEO: dict[str, str] = {
-    "gdp_growth_real_weo": "NGDP_RPCH",              # Real GDP growth (%)
-    "gov_debt_gdp": "GGXWDN_NGDP",                   # General gov gross debt (% GDP)
-    "fiscal_balance_gdp": "GGB_NGDP",                # General gov overall balance (% GDP)
-    # If your WEO puller supports it and the series exists, keep; otherwise it will be dropped safely
-    "primary_balance_gdp": "GGXONLB_NGDP",           # Primary balance (% GDP) (may be missing for some)
+    "gdp_growth_real_weo": "NGDP_RPCH",
+    "gov_debt_gdp": "GGXWDN_NGDP",
+    "fiscal_balance_gdp": "GGB_NGDP",
+    "primary_balance_gdp": "GGXONLB_NGDP",  # may be missing; handled safely
 }
 
 
 def run(countries: list[str], start: int = 2005, end: int = 2030) -> pd.DataFrame:
-    """
-    Collect Pillar 1 raw data from:
-      - World Bank (WDI indicators)
-      - IMF WEO (macro-fiscal & debt)
-    Output:
-      data/raw/pillar1_wdi.(csv|parquet)
-      data/raw/pillar1_weo.(csv|parquet)
-      data/raw/pillar1_combined.(csv|parquet)
-    Returns:
-      combined tidy dataframe with columns: iso3c, year, value, series_name, source
-    """
     load_dotenv()
-
     os.makedirs("data/raw", exist_ok=True)
 
-    # --------
-    # World Bank
-    # --------
+    # --- WDI ---
     wdi_frames: list[pd.DataFrame] = []
     for series_name, ind_code in PILLAR1_WDI.items():
         df = fetch_wdi_indicator(countries, ind_code, start=start, end=end)
@@ -69,13 +45,10 @@ def run(countries: list[str], start: int = 2005, end: int = 2030) -> pd.DataFram
         if wdi_frames
         else pd.DataFrame(columns=["iso3c", "year", "value", "series_name", "source"])
     )
-
     wdi_out.to_parquet("data/raw/pillar1_wdi.parquet", index=False)
     wdi_out.to_csv("data/raw/pillar1_wdi.csv", index=False)
 
-    # ----
-    # IMF WEO
-    # ----
+    # --- WEO ---
     weo_raw = fetch_weo(
         countries=countries,
         indicators=list(PILLAR1_WEO.values()),
@@ -86,7 +59,6 @@ def run(countries: list[str], start: int = 2005, end: int = 2030) -> pd.DataFram
     if weo_raw.empty:
         weo_out = pd.DataFrame(columns=["iso3c", "year", "value", "series_name", "source"])
     else:
-        # Map WEO codes -> our series_name
         code_to_series = {code: name for name, code in PILLAR1_WEO.items()}
         weo_raw["series_name"] = weo_raw["indicator"].map(code_to_series)
         weo_out = (
@@ -99,9 +71,7 @@ def run(countries: list[str], start: int = 2005, end: int = 2030) -> pd.DataFram
     weo_out.to_parquet("data/raw/pillar1_weo.parquet", index=False)
     weo_out.to_csv("data/raw/pillar1_weo.csv", index=False)
 
-    # --------
-    # Combine
-    # --------
+    # --- Combine ---
     combined = (
         pd.concat([wdi_out, weo_out], ignore_index=True)
         .sort_values(["iso3c", "series_name", "year"])
@@ -115,9 +85,7 @@ def run(countries: list[str], start: int = 2005, end: int = 2030) -> pd.DataFram
 
 
 if __name__ == "__main__":
-    # Pilot list (change as needed)
     pilot_countries = ["SEN", "GHA", "KEN"]
-
     df = run(pilot_countries, start=2005, end=2030)
 
     print("✅ Saved:")
